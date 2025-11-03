@@ -9,9 +9,15 @@ Convert rosbag / mcap to lerobot
 pip install git+https://github.com/OpenGalaxea/GalaxeaLeRobot.git
 pip install loguru pyquaternion scipy
 ```
+4. build hdas_msg
+```bash
+colcon build --packages-select hdas_msg
+```
 
 ## Usage
 Edit dataset_name, input_dir, output_dir and robot_type in run.sh, then
 ```bash
+# build hdas_msg before source
+source install/setup.bash 
 bash run.sh
 ```

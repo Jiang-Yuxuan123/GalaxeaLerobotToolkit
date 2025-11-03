@@ -2,6 +2,7 @@
 dataset_name=debug
 input_dir=/home/user/workspace/data/mcap/
 output_dir=/home/user/workspace/data/lerobot/
+robot_type=R1Pro # options: R1Pro, R1Lite
 
 export SAVE_VIDEO=1 
 export USE_H264=0
@@ -14,5 +15,5 @@ export USE_TRANSLATION=0
 python -m dataset_converter \
     --input_dir $input_dir \
     --output_dir $output_dir \
-    --robot_type R1Pro \
+    --robot_type $robot_type \
     --dataset_name $dataset_name
