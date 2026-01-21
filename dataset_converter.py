@@ -505,7 +505,8 @@ class DataConverter:
             if topic == RGB_HEAD_LEFT_TOPIC:
                 bridge = CvBridge()
                 head_rgb_images_list = []
-                head_images = np.array([bridge.compressed_imgmsg_to_cv2(msg) for msg in data])
+                head_images = np.array([cv2.cvtColor(bridge.compressed_imgmsg_to_cv2(msg), cv2.COLOR_BGR2RGB) for msg in data])
+                # head_images = np.array([bridge.compressed_imgmsg_to_cv2(msg) for msg in data])
                 self.shape_of_images["HEAD_LEFT_RGB"] = head_images[0].shape
                 for i in range(len(index_array) - 1):
                     head_rgb_images_list.append(head_images[index_array[i]:index_array[i+1]])
@@ -514,7 +515,10 @@ class DataConverter:
             elif topic in self.RGB_TOPICS:
                 bridge = CvBridge()
                 wrist_rgb_images_list = []
-                first_image_shape = bridge.compressed_imgmsg_to_cv2(data[0]).shape
+                # first_image_shape = bridge.compressed_imgmsg_to_cv2(data[0]).shape
+                first_bgr_img = bridge.compressed_imgmsg_to_cv2(data[0])
+                first_rgb_img = cv2.cvtColor(first_bgr_img, cv2.COLOR_BGR2RGB)
+                first_image_shape = first_rgb_img.shape
                 if topic == RGB_WRIST_LEFT_TOPIC:
                     self.shape_of_images["WRIST_LEFT_RGB"] = first_image_shape
                 if topic == RGB_WRIST_RIGHT_TOPIC:
@@ -803,7 +807,10 @@ class DataConverter:
         for msg in source_data:
             timestamp = msg.header.stamp.sec + msg.header.stamp.nanosec / 1e9
             source_timestamps.append(timestamp)
-            source_images.append(bridge.compressed_imgmsg_to_cv2(msg))
+            # source_images.append(bridge.compressed_imgmsg_to_cv2(msg))
+            bgr_img = bridge.compressed_imgmsg_to_cv2(msg)
+            rgb_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
+            source_images.append(rgb_img)
         
         source_timestamps = np.array(source_timestamps)
         source_images = np.array(source_images)
@@ -989,10 +996,10 @@ if __name__ == '__main__':
         import rclpy
         from rclpy.serialization import deserialize_message
         from rosbag2_py import SequentialReader, StorageOptions, ConverterOptions
-        logger.info(f"Use ROS1")
+        logger.info(f"Use ROS2")
     else:
         import rosbag
-        logger.info(f"Use ROS2")
+        logger.info(f"Use ROS1")
 
     if not USE_ROS1:
         rclpy.init()
