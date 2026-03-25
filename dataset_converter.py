@@ -554,6 +554,22 @@ class DataConverter:
             elif topic in self.POSE_TOPICS:
                 pose_transforms = []
                 pose_timestamps = []
+                if len(data) == 0:
+                    pose_fallback_map = {
+                        EE_POSE_ACTION_LEFT_TOPIC: EE_POSE_OBS_LEFT_TOPIC,
+                        EE_POSE_ACTION_RIGHT_TOPIC: EE_POSE_OBS_RIGHT_TOPIC,
+                    }
+                    if topic in pose_fallback_map:
+                        fallback_topic = pose_fallback_map[topic]
+                        fallback_data = processed_msgs.get(fallback_topic, None)
+                        if isinstance(fallback_data, list) and len(fallback_data) > 0:
+                            logger.warning(
+                                f"Empty pose data for topic={topic}, mcap_path={mcap_path}. "
+                                f"Using state pose from topic={fallback_topic} as fallback."
+                            )
+                            processed_msgs[topic] = [np.array(chunk, copy=True) for chunk in fallback_data]
+                            continue
+                    logger.warning(f"Empty pose data for topic={topic}, mcap_path={mcap_path}. Using default identity pose.")
                 for msg in data:
                     timestamp = self.msg_to_timestamp(msg)
                     transform_ref = msg.pose
@@ -563,7 +579,12 @@ class DataConverter:
                     pose_timestamps.append(timestamp)
                 pose_transforms = np.array(pose_transforms)
                 pose_timestamps = np.array(pose_timestamps)
-                transforms = self.interpolate_transform(head_rgb_timestamps, pose_timestamps, pose_transforms)
+                transforms = self.interpolate_transform(
+                    head_rgb_timestamps,
+                    pose_timestamps,
+                    pose_transforms,
+                    topic_name=topic,
+                )
 
                 pose_list = []
                 for i in range(len(index_array) - 1):
@@ -636,7 +657,12 @@ class DataConverter:
                 imu = np.array(imu)
                 imu_transforms = np.array(imu_transforms)
                 imu = self.interpolate_1d(head_rgb_timestamps, timestamps, imu)
-                transforms = self.interpolate_transform(head_rgb_timestamps, timestamps, imu_transforms)
+                transforms = self.interpolate_transform(
+                    head_rgb_timestamps,
+                    timestamps,
+                    imu_transforms,
+                    topic_name=topic,
+                )
                 
                 imu_list = []
                 for i in range(len(index_array) - 1):
@@ -734,6 +760,57 @@ class DataConverter:
 
     
     def create_episode(self, processed_dataset):
+        def safe_get(sequence, idx):
+            if len(sequence) == 0:
+                raise ValueError("Empty sequence encountered when creating episode")
+            if idx < len(sequence):
+                return sequence[idx]
+            return sequence[-1]
+
+        left_arm_obs_pos = processed_dataset[JOINT_OBS_LEFT_TOPIC][0]["position"]
+        right_arm_obs_pos = processed_dataset[JOINT_OBS_RIGHT_TOPIC][0]["position"]
+        left_gripper_obs_pos = processed_dataset[GRIPPER_OBS_LEFT_TOPIC][0]["position"]
+        right_gripper_obs_pos = processed_dataset[GRIPPER_OBS_RIGHT_TOPIC][0]["position"]
+        chassis_obs_vel = processed_dataset[CHASSIS_OBS_TOPIC][0]["velocity"]
+        left_ee_obs_pose = processed_dataset[EE_POSE_OBS_LEFT_TOPIC][0]
+        right_ee_obs_pose = processed_dataset[EE_POSE_OBS_RIGHT_TOPIC][0]
+
+        left_arm_action_pos = processed_dataset[JOINT_ACTION_LEFT_TOPIC][0]["position"]
+        if len(left_arm_action_pos) == 0:
+            logger.warning(f"Empty topic={JOINT_ACTION_LEFT_TOPIC}, fallback to {JOINT_OBS_LEFT_TOPIC}")
+            left_arm_action_pos = left_arm_obs_pos
+
+        right_arm_action_pos = processed_dataset[JOINT_ACTION_RIGHT_TOPIC][0]["position"]
+        if len(right_arm_action_pos) == 0:
+            logger.warning(f"Empty topic={JOINT_ACTION_RIGHT_TOPIC}, fallback to {JOINT_OBS_RIGHT_TOPIC}")
+            right_arm_action_pos = right_arm_obs_pos
+
+        left_gripper_action = processed_dataset[GRIPPER_ACTION_LEFT_TOPIC][0]
+        if len(left_gripper_action) == 0:
+            logger.warning(f"Empty topic={GRIPPER_ACTION_LEFT_TOPIC}, fallback to {GRIPPER_OBS_LEFT_TOPIC}")
+            left_gripper_action = left_gripper_obs_pos
+
+        right_gripper_action = processed_dataset[GRIPPER_ACTION_RIGHT_TOPIC][0]
+        if len(right_gripper_action) == 0:
+            logger.warning(f"Empty topic={GRIPPER_ACTION_RIGHT_TOPIC}, fallback to {GRIPPER_OBS_RIGHT_TOPIC}")
+            right_gripper_action = right_gripper_obs_pos
+
+        chassis_action_vel = processed_dataset[CHASSIS_ACTION_TOPIC][0]
+        if len(chassis_action_vel) == 0:
+            logger.warning(f"Empty topic={CHASSIS_ACTION_TOPIC}, fallback to {CHASSIS_OBS_TOPIC}.velocity")
+            chassis_action_vel = chassis_obs_vel
+
+        if self.robot_type == "r1pro":
+            left_ee_action_pose = processed_dataset[EE_POSE_ACTION_LEFT_TOPIC][0]
+            if len(left_ee_action_pose) == 0:
+                logger.warning(f"Empty topic={EE_POSE_ACTION_LEFT_TOPIC}, fallback to {EE_POSE_OBS_LEFT_TOPIC}")
+                left_ee_action_pose = left_ee_obs_pose
+
+            right_ee_action_pose = processed_dataset[EE_POSE_ACTION_RIGHT_TOPIC][0]
+            if len(right_ee_action_pose) == 0:
+                logger.warning(f"Empty topic={EE_POSE_ACTION_RIGHT_TOPIC}, fallback to {EE_POSE_OBS_RIGHT_TOPIC}")
+                right_ee_action_pose = right_ee_obs_pose
+
         episode = []
         for i in range(len(processed_dataset[RGB_HEAD_LEFT_TOPIC][0])):
             frame = {}
@@ -759,20 +836,20 @@ class DataConverter:
             frame["observation.state.right_ee_pose"] = processed_dataset[EE_POSE_OBS_RIGHT_TOPIC][0][i]
             
             if self.robot_type == "r1pro":
-                frame["action.left_ee_pose"] = processed_dataset[EE_POSE_ACTION_LEFT_TOPIC][0][i]
-                frame["action.right_ee_pose"] = processed_dataset[EE_POSE_ACTION_RIGHT_TOPIC][0][i]
+                frame["action.left_ee_pose"] = safe_get(left_ee_action_pose, i)
+                frame["action.right_ee_pose"] = safe_get(right_ee_action_pose, i)
             
-            frame["action.left_gripper"] = processed_dataset[GRIPPER_ACTION_LEFT_TOPIC][0][i]
-            frame["action.right_gripper"] = processed_dataset[GRIPPER_ACTION_RIGHT_TOPIC][0][i]
-            frame["action.left_arm"] = processed_dataset[JOINT_ACTION_LEFT_TOPIC][0]["position"][i]
-            frame["action.right_arm"] = processed_dataset[JOINT_ACTION_RIGHT_TOPIC][0]["position"][i]
-            frame["action.chassis.velocities"] = processed_dataset[CHASSIS_ACTION_TOPIC][0][i]
+            frame["action.left_gripper"] = safe_get(left_gripper_action, i)
+            frame["action.right_gripper"] = safe_get(right_gripper_action, i)
+            frame["action.left_arm"] = safe_get(left_arm_action_pos, i)
+            frame["action.right_arm"] = safe_get(right_arm_action_pos, i)
+            frame["action.chassis.velocities"] = safe_get(chassis_action_vel, i)
             
             # only R1 Pro with whole-body control has torso joint action, while R1 Lite still uses torso speed control
             if self.robot_type == "r1pro" and len(processed_dataset[TORSO_ACTION_TOPIC][0]["position"]) > 0:
-                frame["action.torso"] = processed_dataset[TORSO_ACTION_TOPIC][0]["position"][i]
+                frame["action.torso"] = safe_get(processed_dataset[TORSO_ACTION_TOPIC][0]["position"], i)
             if self.robot_type == "r1lite" and len(processed_dataset[TORSO_ACTION_SPEED_TOPIC][0]) > 0:
-                frame["action.torso.velocities"] = processed_dataset[TORSO_ACTION_SPEED_TOPIC][0][i]
+                frame["action.torso.velocities"] = safe_get(processed_dataset[TORSO_ACTION_SPEED_TOPIC][0], i)
 
             episode.append(frame)
         
@@ -831,7 +908,31 @@ class DataConverter:
 
         return interpolated_states
         
-    def interpolate_transform(self, target_timestamps, source_timestamps, source_values):
+    def interpolate_transform(self, target_timestamps, source_timestamps, source_values, topic_name="unknown"):
+        if len(target_timestamps) == 0:
+            return np.empty((0, 7))
+
+        source_values = np.asarray(source_values)
+        source_timestamps = np.asarray(source_timestamps)
+
+        if len(source_timestamps) == 0 or source_values.size == 0:
+            logger.warning(f"No transform source data for topic={topic_name}. Filling with identity pose.")
+            target_values = np.zeros((len(target_timestamps), 7), dtype=np.float64)
+            target_values[:, 6] = 1.0
+            return target_values
+
+        if source_values.ndim == 1:
+            source_values = source_values.reshape(1, -1)
+
+        if source_values.shape[1] != 7:
+            raise ValueError(f"Invalid transform shape for topic={topic_name}: expected last dim=7, got {source_values.shape}")
+
+        if len(source_timestamps) == 1 or source_values.shape[0] == 1:
+            logger.warning(f"Only one transform sample for topic={topic_name}. Repeating it for all target timestamps.")
+            one = source_values[0].astype(np.float64)
+            target_values = np.tile(one, (len(target_timestamps), 1))
+            return target_values
+
         positions = source_values[:, :3]
         quaternions = [pyQuaternion(source_values[i, 6], source_values[i, 3], source_values[i, 4], source_values[i, 5]) for i in range(source_values.shape[0])]
 
