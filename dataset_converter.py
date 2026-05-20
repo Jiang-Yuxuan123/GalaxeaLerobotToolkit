@@ -249,15 +249,9 @@ class DataConverter:
         features = {}
         # RGB
         image_dtype = "video" if self.save_video else "image"
-        features["observation.images.head_rgb"] = {
-            "dtype": image_dtype,
-            "shape": self.shape_of_images["HEAD_LEFT_RGB"],
-            "names": ["height", "width", "channels"],
-        }
-
         features["observation.images.head_right_rgb"] = {
             "dtype": image_dtype,
-            "shape": self.shape_of_images["HEAD_LEFT_RGB"],
+            "shape": self.shape_of_images["HEAD_RIGHT_RGB"],
             "names": ["height", "width", "channels"],
         }
 
@@ -493,6 +487,9 @@ class DataConverter:
         mcap_path = mcap_info["path"]
         processed_msgs = self.extract(mcap_path)
         head_rgb_timestamps = np.array([self.msg_to_timestamp(msg) for msg in processed_msgs[RGB_HEAD_LEFT_TOPIC]])
+        if len(head_rgb_timestamps) == 0:
+            logger.warning(f"No head RGB timestamps found for {mcap_path}, skipping episode.")
+            return []
         fps = int(np.round(1.0 / np.median(head_rgb_timestamps[1:] - head_rgb_timestamps[:-1])))
         self.fps_dict[str(idx)] = fps
         index_array = np.array([0, len(head_rgb_timestamps)])
@@ -503,14 +500,7 @@ class DataConverter:
                 continue
             
             if topic == RGB_HEAD_LEFT_TOPIC:
-                bridge = CvBridge()
-                head_rgb_images_list = []
-                head_images = np.array([cv2.cvtColor(bridge.compressed_imgmsg_to_cv2(msg), cv2.COLOR_BGR2RGB) for msg in data])
-                # head_images = np.array([bridge.compressed_imgmsg_to_cv2(msg) for msg in data])
-                self.shape_of_images["HEAD_LEFT_RGB"] = head_images[0].shape
-                for i in range(len(index_array) - 1):
-                    head_rgb_images_list.append(head_images[index_array[i]:index_array[i+1]])
-                processed_msgs[topic] = head_rgb_images_list
+                continue
 
             elif topic in self.RGB_TOPICS:
                 bridge = CvBridge()
@@ -519,6 +509,8 @@ class DataConverter:
                 first_bgr_img = bridge.compressed_imgmsg_to_cv2(data[0])
                 first_rgb_img = cv2.cvtColor(first_bgr_img, cv2.COLOR_BGR2RGB)
                 first_image_shape = first_rgb_img.shape
+                if topic == RGB_HEAD_RIGHT_TOPIC:
+                    self.shape_of_images["HEAD_RIGHT_RGB"] = first_image_shape
                 if topic == RGB_WRIST_LEFT_TOPIC:
                     self.shape_of_images["WRIST_LEFT_RGB"] = first_image_shape
                 if topic == RGB_WRIST_RIGHT_TOPIC:
@@ -812,9 +804,9 @@ class DataConverter:
                 right_ee_action_pose = right_ee_obs_pose
 
         episode = []
-        for i in range(len(processed_dataset[RGB_HEAD_LEFT_TOPIC][0])):
+        frame_count = len(processed_dataset[RGB_HEAD_RIGHT_TOPIC][0])
+        for i in range(frame_count):
             frame = {}
-            frame["observation.images.head_rgb"] = processed_dataset[RGB_HEAD_LEFT_TOPIC][0][i]
             frame["observation.images.head_right_rgb"] = processed_dataset[RGB_HEAD_RIGHT_TOPIC][0][i]
             frame["observation.images.left_wrist_rgb"] = processed_dataset[self.RGB_WRIST_LEFT_TOPIC][0][i]
             frame["observation.images.right_wrist_rgb"] = processed_dataset[self.RGB_WRIST_RIGHT_TOPIC][0][i]
