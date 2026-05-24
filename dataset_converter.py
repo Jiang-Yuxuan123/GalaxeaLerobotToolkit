@@ -30,6 +30,8 @@ IS_COMPUTE_EPISODE_STATS_IMAGE = bool(int(os.getenv('IS_COMPUTE_EPISODE_STATS_IM
 MAX_PROCESSES = int(os.getenv('MAX_PROCESSES', 6))
 # default: original description (possibly Chinese)
 USE_TRANSLATION = bool(int(os.getenv('USE_TRANSLATION', 0)))
+# default: keep velocity channels; when set to 1, skip velocity interpolation and fill zeros
+SKIP_VELOCITY = bool(int(os.getenv('SKIP_VELOCITY', 0)))
 
 logger.info("env variables")
 logger.info(f"USE_ROS1: {USE_ROS1}")
@@ -39,6 +41,7 @@ logger.info(f"USE_COMPRESSION: {USE_COMPRESSION}")
 logger.info(f"IS_COMPUTE_EPISODE_STATS_IMAGE: {IS_COMPUTE_EPISODE_STATS_IMAGE}")
 logger.info(f"MAX_PROCESSES: {MAX_PROCESSES}")
 logger.info(f"USE_TRANSLATION: {USE_TRANSLATION}")
+logger.info(f"SKIP_VELOCITY: {SKIP_VELOCITY}")
 
 # Configure Loguru to avoid duplicate logs
 # Remove the default sink before adding our own, otherwise messages
@@ -530,11 +533,19 @@ class DataConverter:
                     positions.append(list(msg.position))
                     velocities.append(list(msg.velocity))
                 interpolated_positions = self.interpolate_1d(head_rgb_timestamps, timestamps, positions)
-                try:
-                    interpolated_velocities = self.interpolate_1d(head_rgb_timestamps, timestamps, velocities)
-                except Exception as e:
-                    logger.error(f"Error interpolating velocities for mcap_path={mcap_path}: {e}")
-                    raise
+                interpolated_positions_np = np.asarray(interpolated_positions, dtype=np.float64)
+                if SKIP_VELOCITY:
+                    interpolated_velocities = np.zeros_like(interpolated_positions_np)
+                else:
+                    try:
+                        velocity_array = np.asarray(velocities, dtype=np.float64)
+                        interpolated_velocities = self.interpolate_1d(head_rgb_timestamps, timestamps, velocity_array)
+                    except Exception as e:
+                        logger.warning(
+                            f"Velocity interpolation failed for topic={topic}, mcap_path={mcap_path}: {e}. "
+                            "Falling back to zeros only for this topic."
+                        )
+                        interpolated_velocities = np.zeros_like(interpolated_positions_np)
                 joint_dict_list = list()
                 for i in range(len(index_array) - 1):
                     joint_dict = dict()
@@ -677,7 +688,15 @@ class DataConverter:
                     positions = self.interpolate_1d(head_rgb_timestamps, timestamps, positions)
                 
                 if len(velocities) > 0:
-                    velocities = self.interpolate_1d(head_rgb_timestamps, timestamps, velocities)
+                    try:
+                        velocity_array = np.asarray(velocities, dtype=np.float64)
+                        velocities = self.interpolate_1d(head_rgb_timestamps, timestamps, velocity_array)
+                    except Exception as e:
+                        logger.warning(
+                            f"Velocity interpolation failed for control topic={topic}, mcap_path={mcap_path}: {e}. "
+                            "Falling back to zeros only for this topic."
+                        )
+                        velocities = np.zeros_like(np.asarray(positions, dtype=np.float64))
 
                 joint_dict_list = list()
                 for i in range(len(index_array) - 1):
