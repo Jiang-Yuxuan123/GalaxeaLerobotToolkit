@@ -1,7 +1,7 @@
 #!/bin/bash
 dataset_name=debug
-input_dir=/home/ziqi/git/data/real/mcap/shucai/wipe
-output_dir=/home/ziqi/git/data/real/lerobot_data/shucai/wipe/20260513
+input_dir=/home/ziqi/git/data/real/mcap/shucai/arrange/20260525
+output_dir=/home/ziqi/git/data/real/lerobot_data/shucai/arrange/20260525
 robot_type=R1Pro # options: R1Pro, R1Lite
 
 export SAVE_VIDEO=1 
